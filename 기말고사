@@ -1,0 +1,202 @@
+import pygame
+import random
+import math
+import time
+
+# 설정
+WIDTH, HEIGHT = 800, 600
+FPS = 60
+MISSILE_COUNT = 5
+MAX_BATTERY = 100  # ECM 배터리
+BATTERY_DRAIN = 1  # 배터리 소모율
+CHARGING_RATE = 5  # 배터리 충전 속도
+
+# 색상
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+ECM_COLOR = (0, 255, 255)
+MISSILE_COLOR = (255, 0, 0)
+DISTURBED_COLOR = (255, 165, 0)
+EXPLOSION_COLOR = (255, 100, 0)
+GAME_OVER_COLOR = (255, 0, 0)
+
+# 초기화
+pygame.init()
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Advanced ECM Simulator")
+clock = pygame.time.Clock()
+font = pygame.font.SysFont(None, 24)
+
+# ECM 장비
+ecm = {
+    "x": WIDTH // 2,
+    "y": HEIGHT // 2,
+    "radius": 120,
+    "max_radius": 200,
+    "level": 1,
+    "battery": MAX_BATTERY,  # 배터리 잔량
+    "charging": False,  # 충전 중 여부
+    "last_used": time.time()  # 마지막 사용 시간
+}
+
+# 미사일 종류
+class Missile:
+    def __init__(self, x, y, vx, vy, missile_type="basic", disturbed=False, guided=False):
+        self.x = x
+        self.y = y
+        self.vx = vx
+        self.vy = vy
+        self.disturbed = disturbed
+        self.trail = []
+        self.guided = guided  # 유도 미사일 여부
+        self.missile_type = missile_type  # 미사일 타입 (기본, 유도, 초음속)
+
+    def move(self):
+        if self.missile_type == "guided" and not self.disturbed:
+            # 유도 미사일: 목표 ECM을 향해 이동
+            angle = math.atan2(ecm["y"] - self.y, ecm["x"] - self.x)
+            self.vx = math.cos(angle) * 2
+            self.vy = math.sin(angle) * 2
+        elif self.missile_type == "hypersonic":
+            # 초음속 미사일: 매우 빠르게 이동
+            self.vx *= 1.2
+            self.vy *= 1.2
+        
+        self.x += self.vx
+        self.y += self.vy
+
+        # 미사일 잔상
+        self.trail.append((self.x, self.y))
+        if len(self.trail) > 30:
+            self.trail.pop(0)
+
+    def collide_with_ecm(self):
+        dx = self.x - ecm["x"]
+        dy = self.y - ecm["y"]
+        distance = math.hypot(dx, dy)
+        return distance < ecm["radius"]
+
+missiles = []
+
+def create_missiles(n, missile_type="basic"):
+    return [Missile(random.randint(0, WIDTH), random.randint(0, HEIGHT), random.uniform(1, 2), random.uniform(1, 2), missile_type) for _ in range(n)]
+
+def draw_ecm():
+    pygame.draw.circle(screen, ECM_COLOR, (ecm["x"], ecm["y"]), ecm["radius"], width=2)
+    pygame.draw.circle(screen, ECM_COLOR, (ecm["x"], ecm["y"]), 5)
+
+def draw_missile(m):
+    color = DISTURBED_COLOR if m.disturbed else MISSILE_COLOR
+    pygame.draw.circle(screen, color, (int(m.x), int(m.y)), 4)
+
+    # 잔상 그리기
+    for i, (tx, ty) in enumerate(m.trail[-20:]):
+        fade = 255 - i * 10
+        pygame.draw.circle(screen, (color[0], color[1], color[2], fade), (int(tx), int(ty)), 2)
+
+def update_missile(m):
+    if m.collide_with_ecm() and not m.disturbed:
+        m.disturbed = True
+        # ECM 효과 발생
+        m.vx += random.uniform(-1.5, 1.5)
+        m.vy += random.uniform(-1.5, 1.5)
+
+    m.move()
+
+def draw_info(score):
+    text = font.render(f"ECM Level: {ecm['level']} | ECM Radius: {ecm['radius']} | Battery: {ecm['battery']} | Score: {score}", True, WHITE)
+    screen.blit(text, (10, 10))
+
+def reset_missiles(missile_type="basic"):
+    return create_missiles(MISSILE_COUNT, missile_type)
+
+def handle_ecm_battery():
+    if ecm["battery"] > 0 and ecm["charging"] == False:
+        # 배터리 소모
+        if time.time() - ecm["last_used"] > 2:
+            ecm["battery"] -= BATTERY_DRAIN
+            ecm["last_used"] = time.time()
+
+    if ecm["battery"] <= 0:
+        ecm["charging"] = True  # 배터리 소진 후 충전 시작
+
+    if ecm["charging"]:
+        if ecm["battery"] < MAX_BATTERY:
+            ecm["battery"] += CHARGING_RATE
+        else:
+            ecm["charging"] = False
+
+def draw_game_over():
+    game_over_text = font.render("GAME OVER! Press R to Restart", True, GAME_OVER_COLOR)
+    screen.blit(game_over_text, (WIDTH // 3, HEIGHT // 2))
+
+# 점수 시스템
+score = 0
+missile_type = "basic"
+game_over = False
+
+# 메인 루프
+while True:
+    clock.tick(FPS)
+    screen.fill(BLACK)
+
+    if game_over:
+        draw_game_over()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    # 게임 리셋
+                    ecm["battery"] = MAX_BATTERY
+                    score = 0
+                    missiles = reset_missiles(missile_type)
+                    game_over = False
+                    ecm["charging"] = False
+    else:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                ecm["x"], ecm["y"] = pygame.mouse.get_pos()
+
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_UP:
+                    ecm["radius"] = min(ecm["radius"] + 10, ecm["max_radius"])
+                elif event.key == pygame.K_DOWN:
+                    ecm["radius"] = max(10, ecm["radius"] - 10)
+                elif event.key == pygame.K_SPACE:
+                    missiles = reset_missiles(missile_type)
+                elif event.key == pygame.K_g:
+                    missile_type = "guided"
+                    missiles = reset_missiles(missile_type)
+                elif event.key == pygame.K_h:
+                    missile_type = "hypersonic"
+                    missiles = reset_missiles(missile_type)
+                elif event.key == pygame.K_b:
+                    missile_type = "basic"
+                    missiles = reset_missiles(missile_type)
+
+        for m in missiles:
+            update_missile(m)
+            draw_missile(m)
+
+            # 미사일이 ECM과 충돌하면 점수 추가
+            if m.disturbed:
+                score += 1
+                missiles.remove(m)
+                missiles.append(Missile(random.randint(0, WIDTH), random.randint(0, HEIGHT), random.uniform(1, 2), random.uniform(1, 2), missile_type))
+
+        handle_ecm_battery()
+        draw_ecm()
+        draw_info(score)
+
+        if any(m.collide_with_ecm() for m in missiles):
+            game_over = True
+
+    pygame.display.flip()
+
+pygame.quit()
